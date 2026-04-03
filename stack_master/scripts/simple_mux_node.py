@@ -60,6 +60,8 @@ class SimpleMuxNode(Node):
         self.create_subscription(AckermannDriveStamped, in_topic,  self._drive_cb, 10)
         self.create_subscription(Joy,                   joy_topic, self._joy_cb,   10)
         if self.use_estop:
+
+            EStop.declare_parameters(self)
             self.estop = EStop(self)
 
             self.create_subscription(LaserScan, scan_topic, self._scan_cb, 10)
