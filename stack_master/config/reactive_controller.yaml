@@ -1,12 +1,88 @@
 gap_follow:
   ros__parameters:
-    control_rate_hz:  50.0
-    estop_min_dist:   0.5    # [m]
-    estop_angle_deg: 30.0    # [deg]
-    gf_bubble_radius: 0.3    # [m]
-    gf_speed:         2.0    # [m/s]
-    gf_max_steer:     0.4    # [rad]
-    gf_max_range:    10.0    # [m]
+    control_rate_hz: 50.0
+
+    # E-STOP
+    estop_stop_distance: 0.5
+    estop_fov_deg: 30.0
+    estop_ttc_threshold: 0.35
+    estop_max_range: 10.0
+    estop_min_speed: 0.1
+    estop_use_dynamic_center: true
+    estop_center_gain: 0.65
+    estop_max_center_shift_deg: 35.0
+
+    # GAP FOLLOW
+    gf_speed: 2.0
+    gf_max_steer: 0.4
+    gf_max_range: 10.0
+    gf_front_angle_deg: 70.0
+    gf_min_gap_size: 8
+    gf_min_valid_range: 0.05
+
+    # SPEED
+    gf_corner_speed_scale: 0.7
+    gf_min_speed: 0.5
+    gf_close_distance: 2.0
+    gf_very_close_distance: 1.0
+    gf_close_speed: 1.5
+    gf_very_close_speed: 1.0
+
+    # VEHICLE GEOMETRY
+    use_vehicle_geometry: true
+    vehicle_width: 0.30
+    vehicle_length: 0.50
+    vehicle_wheelbase: 0.33
+    vehicle_safety_margin: 0.05
+
+    # CORNER BIAS
+    gf_use_corner_bias: true
+    gf_center_sector_deg: 12.0
+    gf_side_sector_start_deg: 20.0
+    gf_side_sector_end_deg: 70.0
+    gf_turn_open_ratio: 1.25
+    gf_turn_diff_min: 0.8
+    gf_corner_bias_ratio: 0.78
+
+    # ASYMMETRIC FOV
+    gf_use_asymmetric_fov: true
+    gf_left_fov_deg_nominal: 70.0
+    gf_right_fov_deg_nominal: 70.0
+    gf_left_fov_deg_turn: 85.0
+    gf_right_fov_deg_turn: 40.0
+
+    # RACING DIRECTION PRIOR
+    race_follow_side: right # right or left
+    wf_target_dist: 0.6
+    wf_kp: 0.9
+    wf_max_steer: 0.40
+    wf_theta_deg: 50.0
+    wf_right_angle_b_deg: -90.0
+    wf_left_angle_b_deg: 90.0
+    wf_lookahead: 0.5
+    wf_min_valid_dist: 0.15
+    wf_max_valid_dist: 6.0
+
+    # HYBRID SWITCH
+    hybrid_nearest_dist_threshold: 1.5
+    hybrid_gap_width_threshold: 1.20
+    hybrid_gap_override_steer_deg: 10.0
+    hybrid_disable_wall_on_turn_hint: true
+    hybrid_wall_weight: 1.0
+    hybrid_gap_weight: 0.7
+
+    # STEER RATE LIMIT
+    gf_use_steer_rate_limit: true
+    gf_max_steer_rate: 1.8
+
+    # VIS
+    viz_frame: base_link
+    viz_best_point_topic: /gf/best_point_marker
+    viz_nearest_point_topic: /gf/nearest_point_marker
+    viz_bubble_topic: /gf/bubble_marker
+    viz_gap_topic: /gf/gap_marker
+    viz_footprint_topic: /gf/footprint_marker
+    viz_fov_topic: /gf/fov_marker
 
 wall_follow:
   ros__parameters:
