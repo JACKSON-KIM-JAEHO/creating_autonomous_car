@@ -10,12 +10,48 @@ gap_follow:
 
 wall_follow:
   ros__parameters:
-    control_rate_hz:  50.0
-    estop_min_dist:   0.5    # [m]
-    estop_angle_deg: 30.0    # [deg]
-    wf_target_dist:   0.8    # desired gap from right wall [m]
-    wf_kp:            1.0
-    wf_kd:            0.1
-    wf_speed:         1.5    # [m/s]
-    wf_max_steer:     0.4    # [rad]
-    wf_lookahead:     0.5    # [m]
+    control_rate_hz: 50.0
+
+    # E-STOP
+    estop_stop_distance: 0.8
+    estop_fov_deg: 10.0
+    estop_ttc_threshold: 0.35
+    estop_max_range: 10.0
+    estop_min_speed: 0.1
+
+    # WALL FOLLOW
+    wf_target_dist: 0.6
+    wf_kp: 1.4
+    wf_kd: 0.09
+    wf_ki: 0.01
+    wf_speed: 2.0
+    wf_max_steer: 0.6
+    wf_lookahead: 0.4
+    wf_min_speed: 0.55
+
+    # GEOMETRY
+    wf_theta_deg: 50.0
+    wf_angle_b_deg: -90.0
+    wf_front_angle_deg: 0.0
+    wf_front_right_angle_deg: -20.0
+
+    # CORNER HANDLING
+    corner_enter_a_threshold: 4.7
+    corner_exit_a_threshold: 4.1
+    corner_front_threshold: 1.5
+    corner_b_threshold: 2.2
+
+    corner_sharp_steer: -0.30
+    corner_sharp_speed: 0.40
+    corner_medium_steer: -0.24
+    corner_medium_speed: 0.48
+    corner_soft_steer: -0.16
+    corner_soft_speed: 0.55
+
+    # CLAMP
+    integral_clip: 0.20
+    derivative_clip: 3.0
+
+    # SMOOTHING
+    steer_smoothing_alpha: 0.18
+    speed_smoothing_alpha: 0.20
