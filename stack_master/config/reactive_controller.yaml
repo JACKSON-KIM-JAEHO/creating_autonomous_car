@@ -2,17 +2,7 @@ gap_follow:
   ros__parameters:
     control_rate_hz: 50.0
 
-    # E-STOP
-    estop_stop_distance: 0.5
-    estop_fov_deg: 30.0
-    estop_ttc_threshold: 0.35
-    estop_max_range: 10.0
-    estop_min_speed: 0.1
-    estop_use_dynamic_center: true
-    estop_center_gain: 0.65
-    estop_max_center_shift_deg: 35.0
-
-    # GAP FOLLOW
+    # ===== GAP FOLLOW =====
     gf_speed: 2.0
     gf_max_steer: 0.4
     gf_max_range: 10.0
@@ -20,7 +10,6 @@ gap_follow:
     gf_min_gap_size: 8
     gf_min_valid_range: 0.05
 
-    # SPEED
     gf_corner_speed_scale: 0.7
     gf_min_speed: 0.5
     gf_close_distance: 2.0
@@ -28,14 +17,14 @@ gap_follow:
     gf_close_speed: 1.5
     gf_very_close_speed: 1.0
 
-    # VEHICLE GEOMETRY
+    # ===== VEHICLE =====
     use_vehicle_geometry: true
     vehicle_width: 0.30
     vehicle_length: 0.50
     vehicle_wheelbase: 0.33
     vehicle_safety_margin: 0.05
 
-    # CORNER BIAS
+    # ===== GAP / CORNER BIAS =====
     gf_use_corner_bias: true
     gf_center_sector_deg: 12.0
     gf_side_sector_start_deg: 20.0
@@ -44,18 +33,18 @@ gap_follow:
     gf_turn_diff_min: 0.8
     gf_corner_bias_ratio: 0.78
 
-    # ASYMMETRIC FOV
+    # ===== ASYMMETRIC FOV =====
     gf_use_asymmetric_fov: true
     gf_left_fov_deg_nominal: 70.0
     gf_right_fov_deg_nominal: 70.0
     gf_left_fov_deg_turn: 85.0
     gf_right_fov_deg_turn: 40.0
 
-    # RACING DIRECTION PRIOR
-    race_follow_side: right # right or left
-    wf_target_dist: 0.6
+    # ===== WALL FOLLOW PRIOR =====
+    race_follow_side: "right"
+    wf_target_dist: 0.8
     wf_kp: 0.9
-    wf_max_steer: 0.40
+    wf_max_steer: 0.30
     wf_theta_deg: 50.0
     wf_right_angle_b_deg: -90.0
     wf_left_angle_b_deg: 90.0
@@ -63,26 +52,92 @@ gap_follow:
     wf_min_valid_dist: 0.15
     wf_max_valid_dist: 6.0
 
-    # HYBRID SWITCH
-    hybrid_nearest_dist_threshold: 1.5
-    hybrid_gap_width_threshold: 1.20
-    hybrid_gap_override_steer_deg: 10.0
-    hybrid_disable_wall_on_turn_hint: true
-    hybrid_wall_weight: 1.0
-    hybrid_gap_weight: 0.7
+    # ===== HYBRID BLEND =====
+    hybrid_blend_near: 1.5
+    hybrid_blend_far: 3.5
+    hybrid_wall_w_max: 0.5
+    hybrid_gap_w_max: 1.0
+    hybrid_sigmoid_k: 3.0
 
-    # STEER RATE LIMIT
+    # ===== TTC =====
+    gf_ttc_target: 1.2
+    gf_ttc_min: 0.5
+
+    # ===== BUBBLE =====
+    gf_bubble_speed_scale: 0.08
+    gf_bubble_max_radius: 0.50
+    gf_bubble_fov_cap_ratio: 0.25
+    gf_bubble_search_fov_deg: 45.0
+
+    # ===== DISPARITY EXTENDER =====
+    gf_use_disparity_extender: true
+    gf_disparity_threshold: 0.3
+
+    # ===== THREAT =====
+    gf_threat_fov_deg: 40.0
+    gf_threat_cos_min: 0.3
+
+    # ===== CRUISE =====
+    gf_cruise_speed: 3.5
+    gf_cruise_enter_dist: 3.0
+    gf_cruise_exit_dist: 1.8
+
+    # ===== PREDICTIVE SPEED =====
+    gf_threat_slow_far: 3.0
+    gf_threat_slow_near: 1.5
+    gf_turn_speed_scale: 0.6
+
+    # ===== EMA / DEADBAND =====
+    gf_steer_ema_alpha_min: 0.20
+    gf_steer_ema_alpha_max: 0.80
+    gf_steer_alpha_threshold: 0.08
+    gf_steer_deadband: 0.02
+
+    # ===== WALL REPULSION =====
+    gf_repulse_dist: 0.45
+    gf_repulse_gain: 0.35
+    gf_repulse_power: 1.5
+    gf_repulse_max_steer: 0.25
+    gf_repulse_side_start_deg: 25.0
+    gf_repulse_side_end_deg: 85.0
+
+    # ===== CENTER KEEPING =====
+    gf_ck_angle_deg: 80.0
+    gf_ck_kp: 0.15
+    gf_ck_max_steer: 0.20
+    gf_ck_max_dist: 3.0
+    gf_ck_weight: 0.3
+
+    # ===== TURN HINT =====
+    gf_turn_hint_hold_frames: 5
+
+    # ===== RECOVERY =====
+    gf_recovery_speed: -0.8
+    gf_recovery_steer: 0.35
+    gf_recovery_fov_deg: 160.0
+
+    # ===== RATE LIMIT =====
     gf_use_steer_rate_limit: true
     gf_max_steer_rate: 1.8
 
-    # VIS
-    viz_frame: base_link
-    viz_best_point_topic: /gf/best_point_marker
-    viz_nearest_point_topic: /gf/nearest_point_marker
-    viz_bubble_topic: /gf/bubble_marker
-    viz_gap_topic: /gf/gap_marker
-    viz_footprint_topic: /gf/footprint_marker
-    viz_fov_topic: /gf/fov_marker
+    # ===== TARGET SOFTENING =====
+    gf_use_target_center_blend: true
+    gf_target_center_blend_straight: 0.35
+    gf_target_center_blend_turn: 0.18
+    gf_target_edge_guard_ratio: 0.15
+
+    # ===== VIS =====
+    viz_frame: "base_link"
+    viz_best_point_topic: "/gf/best_point_marker"
+    viz_nearest_point_topic: "/gf/nearest_point_marker"
+    viz_bubble_topic: "/gf/bubble_marker"
+    viz_gap_topic: "/gf/gap_marker"
+    viz_all_gaps_topic: "/gf/all_gaps_marker"
+    viz_all_gap_centers_topic: "/gf/all_gap_centers_marker"
+    viz_footprint_topic: "/gf/footprint_marker"
+    viz_fov_topic: "/gf/fov_marker"
+    viz_all_gap_max_range: 3.0
+
 
 wall_follow:
   ros__parameters:

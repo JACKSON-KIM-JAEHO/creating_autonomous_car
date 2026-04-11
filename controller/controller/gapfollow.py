@@ -1,3 +1,4 @@
+
 import math
 import numpy as np
 import rclpy
@@ -89,20 +90,114 @@ class GapFollowNode(Node):
         self.declare_parameter('wf_max_valid_dist', 6.0)
 
         # -------------------------
-        # HYBRID SWITCH CONDITIONS
+        # SMOOTH HYBRID
+        # nearest_dist 기반 연속 가중치:
+        #   dist <= blend_near  → gap_weight=1.0, wall_weight=0.0  (장애물 근접, gap 전용)
+        #   dist >= blend_far   → gap_weight=gap_w_max, wall_weight=wall_w_max (원거리, wall 혼합)
+        #   사이 구간           → 선형 보간
         # -------------------------
-        self.declare_parameter('hybrid_nearest_dist_threshold', 1.5)
-        self.declare_parameter('hybrid_gap_width_threshold', 1.20)
-        self.declare_parameter('hybrid_gap_override_steer_deg', 10.0)
-        self.declare_parameter('hybrid_disable_wall_on_turn_hint', True)
-        self.declare_parameter('hybrid_wall_weight', 1.0)
-        self.declare_parameter('hybrid_gap_weight', 1.0)
+        self.declare_parameter('hybrid_blend_near', 1.5)
+        self.declare_parameter('hybrid_blend_far', 3.5)
+        self.declare_parameter('hybrid_wall_w_max', 0.5)
+        self.declare_parameter('hybrid_gap_w_max', 1.0)
+        self.declare_parameter('hybrid_sigmoid_k', 3.0)
+
+        # -------------------------
+        # TTC-BASED SPEED
+        # -------------------------
+        self.declare_parameter('gf_ttc_target', 1.2)
+        self.declare_parameter('gf_ttc_min', 0.5)
+
+        # -------------------------
+        # BUBBLE SPEED SCALING
+        # -------------------------
+        self.declare_parameter('gf_bubble_speed_scale', 0.08)
+        self.declare_parameter('gf_bubble_max_radius', 0.50)
+        self.declare_parameter('gf_bubble_fov_cap_ratio', 0.25)
+        self.declare_parameter('gf_bubble_search_fov_deg', 45.0)
+
+        # -------------------------
+        # DISPARITY EXTENDER
+        # -------------------------
+        self.declare_parameter('gf_use_disparity_extender', True)
+        self.declare_parameter('gf_disparity_threshold', 0.3)
+
+        # -------------------------
+        # OBSTACLE RELEVANCE
+        # -------------------------
+        self.declare_parameter('gf_threat_fov_deg', 40.0)
+        self.declare_parameter('gf_threat_cos_min', 0.3)
+
+        # -------------------------
+        # CRUISE MODE
+        # -------------------------
+        self.declare_parameter('gf_cruise_speed', 3.5)
+        self.declare_parameter('gf_cruise_enter_dist', 3.0)
+        self.declare_parameter('gf_cruise_exit_dist', 1.8)
+
+        # -------------------------
+        # PREDICTIVE SPEED
+        # -------------------------
+        self.declare_parameter('gf_threat_slow_far', 3.0)
+        self.declare_parameter('gf_threat_slow_near', 1.5)
+
+        # -------------------------
+        # TURN SPEED SCALE
+        # -------------------------
+        self.declare_parameter('gf_turn_speed_scale', 0.6)
+
+        # -------------------------
+        # ADAPTIVE STEERING EMA + DEADBAND
+        # -------------------------
+        self.declare_parameter('gf_steer_ema_alpha_min', 0.20)
+        self.declare_parameter('gf_steer_ema_alpha_max', 0.80)
+        self.declare_parameter('gf_steer_alpha_threshold', 0.08)
+        self.declare_parameter('gf_steer_deadband', 0.02)
+
+        # -------------------------
+        # WALL REPULSION
+        # -------------------------
+        self.declare_parameter('gf_repulse_dist', 0.45)
+        self.declare_parameter('gf_repulse_gain', 0.35)
+        self.declare_parameter('gf_repulse_power', 1.5)
+        self.declare_parameter('gf_repulse_max_steer', 0.25)
+        self.declare_parameter('gf_repulse_side_start_deg', 25.0)
+        self.declare_parameter('gf_repulse_side_end_deg', 85.0)
+
+        # -------------------------
+        # CENTER KEEPING
+        # -------------------------
+        self.declare_parameter('gf_ck_angle_deg', 80.0)
+        self.declare_parameter('gf_ck_kp', 0.15)
+        self.declare_parameter('gf_ck_max_steer', 0.20)
+        self.declare_parameter('gf_ck_max_dist', 3.0)
+        self.declare_parameter('gf_ck_weight', 0.3)
+
+        # -------------------------
+        # TURN HINT HYSTERESIS
+        # -------------------------
+        self.declare_parameter('gf_turn_hint_hold_frames', 5)
+
+        # -------------------------
+        # RECOVERY
+        # -------------------------
+        self.declare_parameter('gf_recovery_speed', -0.8)
+        self.declare_parameter('gf_recovery_steer', 0.35)
+        self.declare_parameter('gf_recovery_fov_deg', 160.0)
 
         # -------------------------
         # STEERING SMOOTHING
         # -------------------------
         self.declare_parameter('gf_use_steer_rate_limit', True)
         self.declare_parameter('gf_max_steer_rate', 1.8)
+
+        # -------------------------
+        # TARGET SOFTENING (deepest + center blend)
+        # -------------------------
+        self.declare_parameter('gf_use_target_center_blend', True)
+        self.declare_parameter('gf_target_center_blend_straight', 0.35)
+        self.declare_parameter('gf_target_center_blend_turn', 0.18)
+        self.declare_parameter('gf_target_edge_guard_ratio', 0.15)
 
         # -------------------------
         # VISUALIZATION
@@ -112,8 +207,11 @@ class GapFollowNode(Node):
         self.declare_parameter('viz_nearest_point_topic', '/gf/nearest_point_marker')
         self.declare_parameter('viz_bubble_topic', '/gf/bubble_marker')
         self.declare_parameter('viz_gap_topic', '/gf/gap_marker')
+        self.declare_parameter('viz_all_gaps_topic', '/gf/all_gaps_marker')
+        self.declare_parameter('viz_all_gap_centers_topic', '/gf/all_gap_centers_marker')
         self.declare_parameter('viz_footprint_topic', '/gf/footprint_marker')
         self.declare_parameter('viz_fov_topic', '/gf/fov_marker')
+        self.declare_parameter('viz_all_gap_max_range', 3.0)
 
         p = lambda name: self.get_parameter(name).value
 
@@ -167,23 +265,76 @@ class GapFollowNode(Node):
         self.wf_min_valid_dist = float(p('wf_min_valid_dist'))
         self.wf_max_valid_dist = float(p('wf_max_valid_dist'))
 
-        self.hybrid_nearest_dist_threshold = float(p('hybrid_nearest_dist_threshold'))
-        self.hybrid_gap_width_threshold = float(p('hybrid_gap_width_threshold'))
-        self.hybrid_gap_override_steer_deg = float(p('hybrid_gap_override_steer_deg'))
-        self.hybrid_disable_wall_on_turn_hint = bool(p('hybrid_disable_wall_on_turn_hint'))
-        self.hybrid_wall_weight = float(p('hybrid_wall_weight'))
-        self.hybrid_gap_weight = float(p('hybrid_gap_weight'))
+        self.hybrid_blend_near = float(p('hybrid_blend_near'))
+        self.hybrid_blend_far = float(p('hybrid_blend_far'))
+        self.hybrid_wall_w_max = float(p('hybrid_wall_w_max'))
+        self.hybrid_gap_w_max = float(p('hybrid_gap_w_max'))
+        self.hybrid_sigmoid_k = float(p('hybrid_sigmoid_k'))
+
+        self.ttc_target = float(p('gf_ttc_target'))
+        self.ttc_min = float(p('gf_ttc_min'))
+
+        self.bubble_speed_scale = float(p('gf_bubble_speed_scale'))
+        self.bubble_max_radius = float(p('gf_bubble_max_radius'))
+        self.bubble_fov_cap_ratio = float(p('gf_bubble_fov_cap_ratio'))
+        self.bubble_search_fov_deg = float(p('gf_bubble_search_fov_deg'))
+
+        self.use_disparity_extender = bool(p('gf_use_disparity_extender'))
+        self.disparity_threshold = float(p('gf_disparity_threshold'))
+
+        self.threat_fov_deg = float(p('gf_threat_fov_deg'))
+        self.threat_cos_min = float(p('gf_threat_cos_min'))
+
+        self.cruise_speed = float(p('gf_cruise_speed'))
+        self.cruise_enter_dist = float(p('gf_cruise_enter_dist'))
+        self.cruise_exit_dist = float(p('gf_cruise_exit_dist'))
+
+        self.threat_slow_far = float(p('gf_threat_slow_far'))
+        self.threat_slow_near = float(p('gf_threat_slow_near'))
+        self.turn_speed_scale = float(p('gf_turn_speed_scale'))
+
+        self.steer_ema_alpha_min = float(p('gf_steer_ema_alpha_min'))
+        self.steer_ema_alpha_max = float(p('gf_steer_ema_alpha_max'))
+        self.steer_alpha_threshold = float(p('gf_steer_alpha_threshold'))
+        self.steer_deadband = float(p('gf_steer_deadband'))
+
+        self.repulse_dist = float(p('gf_repulse_dist'))
+        self.repulse_gain = float(p('gf_repulse_gain'))
+        self.repulse_power = float(p('gf_repulse_power'))
+        self.repulse_max_steer = float(p('gf_repulse_max_steer'))
+        self.repulse_side_start_deg = float(p('gf_repulse_side_start_deg'))
+        self.repulse_side_end_deg = float(p('gf_repulse_side_end_deg'))
+
+        self.ck_angle_deg = float(p('gf_ck_angle_deg'))
+        self.ck_kp = float(p('gf_ck_kp'))
+        self.ck_max_steer = float(p('gf_ck_max_steer'))
+        self.ck_max_dist = float(p('gf_ck_max_dist'))
+        self.ck_weight = float(p('gf_ck_weight'))
+
+        self.turn_hint_hold_frames = int(p('gf_turn_hint_hold_frames'))
+
+        self.recovery_speed = float(p('gf_recovery_speed'))
+        self.recovery_steer = float(p('gf_recovery_steer'))
+        self.recovery_fov_deg = float(p('gf_recovery_fov_deg'))
 
         self.use_steer_rate_limit = bool(p('gf_use_steer_rate_limit'))
         self.max_steer_rate = float(p('gf_max_steer_rate'))
+
+        self.use_target_center_blend = bool(p('gf_use_target_center_blend'))
+        self.target_center_blend_straight = float(p('gf_target_center_blend_straight'))
+        self.target_center_blend_turn = float(p('gf_target_center_blend_turn'))
+        self.target_edge_guard_ratio = float(p('gf_target_edge_guard_ratio'))
 
         self.viz_frame = str(p('viz_frame'))
         self.viz_best_point_topic = str(p('viz_best_point_topic'))
         self.viz_nearest_point_topic = str(p('viz_nearest_point_topic'))
         self.viz_bubble_topic = str(p('viz_bubble_topic'))
         self.viz_gap_topic = str(p('viz_gap_topic'))
+        self.viz_all_gaps_topic = str(p('viz_all_gaps_topic'))
+        self.viz_all_gap_centers_topic = str(p('viz_all_gap_centers_topic'))
         self.viz_footprint_topic = str(p('viz_footprint_topic'))
         self.viz_fov_topic = str(p('viz_fov_topic'))
+        self.viz_all_gap_max_range = float(p('viz_all_gap_max_range'))
 
         # =========================
         # State
@@ -192,6 +343,20 @@ class GapFollowNode(Node):
         self.odom = None
         self.prev_steer = 0.0
         self.prev_time = None
+
+        # turn hint hysteresis state
+        self._turn_hint_stable = 'center'
+        self._turn_hint_candidate = 'center'
+        self._turn_hint_count = 0
+
+        # cruise mode state (hysteresis)
+        self._cruise_active = False
+
+        # steering EMA state
+        self._steer_ema = 0.0
+
+        # recovery state
+        self._recovery_active = False
 
         self.estop = EStop(self)
 
@@ -211,12 +376,14 @@ class GapFollowNode(Node):
         self.nearest_point_pub = self.create_publisher(Marker, self.viz_nearest_point_topic, 10)
         self.bubble_pub = self.create_publisher(Marker, self.viz_bubble_topic, 10)
         self.gap_pub = self.create_publisher(Marker, self.viz_gap_topic, 10)
+        self.all_gaps_pub = self.create_publisher(Marker, self.viz_all_gaps_topic, 10)
+        self.all_gap_centers_pub = self.create_publisher(Marker, self.viz_all_gap_centers_topic, 10)
         self.footprint_pub = self.create_publisher(Marker, self.viz_footprint_topic, 10)
         self.fov_pub = self.create_publisher(Marker, self.viz_fov_topic, 10)
 
         self.create_timer(1.0 / self.control_rate_hz, self._loop)
 
-        self.get_logger().info('GapFollowNode ready (race-direction hybrid)')
+        self.get_logger().info('GapFollowNode ready (race-direction hybrid + softened target + all-gap viz)')
 
     def _scan_cb(self, msg):
         self.scan = msg
@@ -247,7 +414,9 @@ class GapFollowNode(Node):
         msg.drive.steering_angle = float(result['steering'])
         msg.drive.speed = float(result['speed'])
 
-        msg = self.estop.should_stop(self.scan, self.odom, msg)
+        # 리커버리 후진 중에는 EStop 우회
+        if not self._recovery_active:
+            msg = self.estop.should_stop(self.scan, self.odom, msg)
         self.drive_pub.publish(msg)
 
         self._publish_visualization(result)
@@ -263,6 +432,12 @@ class GapFollowNode(Node):
         angle_min = scan.angle_min
         angle_inc = scan.angle_increment
         n = len(ranges)
+
+        # actual vehicle speed from odometry
+        v_actual = abs(float(self.odom.twist.twist.linear.x))
+
+        # 0) obstacle relevance — threat-weighted forward clearance
+        threat_dist = self._compute_threat_distance(ranges, angle_min, angle_inc, n)
 
         # 1) turn hint
         turn_hint = self._detect_turn_hint(ranges, angle_min, angle_inc, n)
@@ -288,94 +463,199 @@ class GapFollowNode(Node):
         nearest_idx = start_idx + int(local_min)
         nearest_dist = float(proc[nearest_idx])
 
-        # 4) vehicle-width-based bubble
-        effective_radius = self._get_effective_bubble_radius()
+        # 4) safety masking: disparity extender + nearest-obstacle bubble
+        effective_radius = self._get_effective_bubble_radius(v_actual)
 
-        if nearest_dist > effective_radius:
-            theta = math.atan2(effective_radius, nearest_dist)
-        else:
-            theta = math.pi / 2.0
+        # 4-a) disparity extender
+        if self.use_disparity_extender:
+            proc = self._apply_disparity_extender(proc, angle_inc, effective_radius, start_idx, end_idx)
 
-        bubble_size = int(theta / angle_inc)
-        bubble_start = max(0, nearest_idx - bubble_size)
-        bubble_end = min(n - 1, nearest_idx + bubble_size)
-        proc[bubble_start:bubble_end + 1] = 0.0
+        # 4-b) nearest-obstacle bubble
+        bub_fov_start = self._angle_to_index(
+            math.radians(-self.bubble_search_fov_deg), angle_min, angle_inc, n)
+        bub_fov_end = self._angle_to_index(
+            math.radians(self.bubble_search_fov_deg), angle_min, angle_inc, n)
+
+        bub_ranges = proc[bub_fov_start:bub_fov_end + 1]
+        bub_valid = np.where(bub_ranges > 0.0)[0]
+
+        if len(bub_valid) > 0:
+            bub_local = bub_valid[np.argmin(bub_ranges[bub_valid])]
+            nearest_idx = bub_fov_start + int(bub_local)
+            nearest_dist = float(proc[nearest_idx])
+
+            if nearest_dist > effective_radius:
+                theta = math.atan2(effective_radius, nearest_dist)
+            else:
+                theta = math.pi / 2.0
+
+            bubble_size = int(theta / angle_inc)
+            fov_beams = max(1, end_idx - start_idx)
+            bubble_size = min(bubble_size, int(fov_beams * self.bubble_fov_cap_ratio))
+            bubble_start = max(0, nearest_idx - bubble_size)
+            bubble_end = min(n - 1, nearest_idx + bubble_size)
+            proc[bubble_start:bubble_end + 1] = 0.0
 
         # 5) gap search
         free = np.where(proc > 0.0)[0]
         if len(free) == 0:
-            return self._empty_result(start_idx, end_idx, angle_min, angle_inc, nearest_idx, nearest_dist, effective_radius)
+            return self._empty_result(
+                start_idx, end_idx, angle_min, angle_inc,
+                nearest_idx, nearest_dist, effective_radius
+            )
 
         splits = np.split(free, np.where(np.diff(free) > 1)[0] + 1)
         gaps = [g for g in splits if len(g) >= self.min_gap_size]
         if len(gaps) == 0:
-            return self._empty_result(start_idx, end_idx, angle_min, angle_inc, nearest_idx, nearest_dist, effective_radius)
+            return self._empty_result(
+                start_idx, end_idx, angle_min, angle_inc,
+                nearest_idx, nearest_dist, effective_radius
+            )
 
-        best_gap = max(gaps, key=lambda g: len(g))
+        all_gap_ranges = [(int(g[0]), int(g[-1])) for g in gaps]
+
+        # forward_idx: LiDAR 기준 정면(0°)에 해당하는 빔 인덱스
+        forward_idx = self._angle_to_index(0.0, angle_min, angle_inc, n)
+        best_gap = max(gaps, key=lambda g: self._score_gap(g, proc, angle_inc, forward_idx))
         gap_start = int(best_gap[0])
         gap_end = int(best_gap[-1])
 
         # 6) gap-follow steer
-        best_idx = self._select_best_point(gap_start, gap_end, turn_hint)
+        best_idx = self._select_best_point(gap_start, gap_end, turn_hint, forward_idx, proc)
         best_dist = float(proc[best_idx])
         best_angle = angle_min + best_idx * angle_inc
         gap_steer = float(np.clip(best_angle, -self.max_steer, self.max_steer))
-        gap_width_est = self._estimate_gap_width(gap_start, gap_end, max(best_dist, 0.8), angle_inc)
+        gap_width_m = self._estimate_gap_width(gap_start, gap_end, max(best_dist, 0.5), angle_inc)
 
         # 7) one-side wall-follow prior
         wall_valid, wall_steer, wall_debug = self._compute_one_side_wall_follow(
             ranges, angle_min, angle_inc, n
         )
 
-        # 8) hybrid switching
-        use_gap_override = False
+        # 7-b) center-keeping
+        ck_valid, ck_steer = self._compute_center_keeping(ranges, angle_min, angle_inc, n)
 
-        if nearest_dist < self.hybrid_nearest_dist_threshold:
-            use_gap_override = True
+        # 7-c) wall repulsion
+        repulse_steer = self._compute_wall_repulsion(ranges, angle_min, angle_inc, n)
 
-        if gap_width_est < self.hybrid_gap_width_threshold:
-            use_gap_override = True
+        # 8) smooth hybrid — 3-way blend
+        blend_near = self.hybrid_blend_near
+        blend_far = self.hybrid_blend_far
+        blend_mid = (blend_near + blend_far) / 2.0
+        k = self.hybrid_sigmoid_k
 
-        if abs(math.degrees(gap_steer)) > self.hybrid_gap_override_steer_deg:
-            use_gap_override = True
-
-        if self.hybrid_disable_wall_on_turn_hint and turn_hint != 'center':
-            use_gap_override = True
-
-        if not wall_valid:
-            use_gap_override = True
-
-        if use_gap_override:
-            steering = gap_steer
-            mode = 'GAP'
+        if not wall_valid or turn_hint != 'center':
+            wall_w = 0.0
         else:
-            steering = self.hybrid_wall_weight * wall_steer + self.hybrid_gap_weight * gap_steer
-            mode = 'BLEND'
+            x = (nearest_dist - blend_mid) / max((blend_far - blend_near) / 2.0, 0.1)
+            sigmoid = 1.0 / (1.0 + math.exp(-k * x))
+            wall_w = sigmoid * self.hybrid_wall_w_max
+
+        ck_w = self.ck_weight if (ck_valid and turn_hint == 'center') else 0.0
+        gap_w = self.hybrid_gap_w_max
+
+        total_w = gap_w + wall_w + ck_w
+        nav_steer = (gap_w * gap_steer + wall_w * wall_steer + ck_w * ck_steer) / total_w \
+                    if total_w > 1e-6 else gap_steer
+
+        steering = nav_steer + repulse_steer
+
+        if wall_w > 0.01 or ck_w > 0.01:
+            mode = f'BLEND(ww={wall_w:.2f},ck={ck_w:.2f},rep={repulse_steer:.2f})'
+        else:
+            mode = f'GAP(rep={repulse_steer:.2f})' if abs(repulse_steer) > 0.01 else 'GAP'
 
         steering = float(np.clip(steering, -self.max_steer, self.max_steer))
+
+        # Adaptive EMA
+        steer_delta = abs(steering - self._steer_ema)
+        if steer_delta > self.steer_alpha_threshold:
+            alpha = self.steer_ema_alpha_max
+        else:
+            t = steer_delta / max(self.steer_alpha_threshold, 1e-6)
+            alpha = self.steer_ema_alpha_min + t * (self.steer_ema_alpha_max - self.steer_ema_alpha_min)
+
+        self._steer_ema = alpha * steering + (1.0 - alpha) * self._steer_ema
+        steering = self._steer_ema
+
+        # deadband
+        if abs(steering) < self.steer_deadband:
+            steering = 0.0
 
         if self.use_steer_rate_limit:
             steering = self._apply_steer_rate_limit(steering, dt)
 
         # 9) speed
         steer_ratio = abs(steering) / self.max_steer if self.max_steer > 1e-6 else 0.0
-        speed = self.gf_speed * (1.0 - self.corner_speed_scale * steer_ratio)
 
-        if best_dist < self.close_distance:
-            speed = min(speed, self.close_speed)
-        if best_dist < self.very_close_distance:
+        if self._cruise_active:
+            if threat_dist < self.cruise_exit_dist or turn_hint != 'center':
+                self._cruise_active = False
+        else:
+            if threat_dist > self.cruise_enter_dist and turn_hint == 'center':
+                self._cruise_active = True
+
+        base_speed = self.cruise_speed if self._cruise_active else self.gf_speed
+
+        # (a) steering-based slowdown
+        speed = base_speed * (1.0 - self.corner_speed_scale * steer_ratio)
+
+        # (b) gap physical width limit
+        passability = (gap_width_m - self.vehicle_width) / max(self.vehicle_width, 0.1)
+        gap_speed_limit = self.min_speed + min(max(passability, 0.0), 1.5) / 1.5 * (base_speed - self.min_speed)
+        speed = min(speed, gap_speed_limit)
+
+        # (c) predictive slowdown by threat distance
+        if threat_dist < self.threat_slow_near:
+            t_slow = max(0.0, threat_dist - self.very_close_distance) / max(
+                self.threat_slow_near - self.very_close_distance, 0.1)
+            threat_speed = self.very_close_speed + t_slow * (self.gf_speed - self.very_close_speed)
+            speed = min(speed, threat_speed)
+        elif threat_dist < self.threat_slow_far:
+            t_pred = (threat_dist - self.threat_slow_near) / max(
+                self.threat_slow_far - self.threat_slow_near, 0.1)
+            threat_speed = self.gf_speed + t_pred * (base_speed - self.gf_speed)
+            speed = min(speed, threat_speed)
+
+        # (d) turn hint cap
+        if turn_hint != 'center':
+            speed = min(speed, base_speed * self.turn_speed_scale)
+
+        # (e) direct forward distance cap
+        fwd_i0 = self._angle_to_index(math.radians(-15.0), angle_min, angle_inc, n)
+        fwd_i1 = self._angle_to_index(math.radians(15.0), angle_min, angle_inc, n)
+        fwd_ranges = ranges[fwd_i0:fwd_i1 + 1]
+        fwd_valid = fwd_ranges[fwd_ranges > self.min_valid_range]
+        fwd_dist = float(np.min(fwd_valid)) if len(fwd_valid) > 0 else self.max_range
+
+        if fwd_dist < self.very_close_distance:
             speed = min(speed, self.very_close_speed)
+        elif fwd_dist < self.close_distance:
+            speed = min(speed, self.close_speed)
+
+        # (f) TTC cap
+        ref_speed = max(v_actual, 0.3)
+        ttc = best_dist / ref_speed
+        if ttc < self.ttc_min:
+            speed = min(speed, best_dist / self.ttc_target)
+        elif ttc < self.ttc_target:
+            ratio = (ttc - self.ttc_min) / (self.ttc_target - self.ttc_min)
+            speed = min(speed, self.min_speed + ratio * (base_speed - self.min_speed))
 
         speed = max(speed, self.min_speed)
 
+        if self._recovery_active:
+            self._recovery_active = False
+            self.get_logger().info('[RECOVERY] Gap found — resuming normal drive.')
+
         self.get_logger().info(
-            f'[RACE] mode={mode} | steer={math.degrees(steering):.1f} deg | '
-            f'gap_steer={math.degrees(gap_steer):.1f} deg | '
-            f'wall_steer={math.degrees(wall_steer):.1f} deg | '
-            f'nearest={nearest_dist:.2f} | gap_width={gap_width_est:.2f} | '
-            f'turn_hint={turn_hint} | '
-            f'wall_valid={wall_valid} | '
-            f'wall_a={wall_debug["a"]:.2f} | wall_b={wall_debug["b"]:.2f}'
+            f'[RACE] mode={mode} | cruise={self._cruise_active} | '
+            f'steer={math.degrees(steering):.1f}° | '
+            f'nearest={nearest_dist:.2f} | threat={threat_dist:.2f} | '
+            f'gap_w={gap_width_m:.2f}m | ttc={ttc:.2f} | '
+            f'v={v_actual:.2f} | spd_cmd={speed:.2f} | '
+            f'turn={turn_hint} | bubble_r={effective_radius:.3f} | '
+            f'wall_w={wall_w:.2f}'
         )
 
         return {
@@ -392,15 +672,55 @@ class GapFollowNode(Node):
             'angle_min': angle_min,
             'angle_inc': angle_inc,
             'effective_radius': effective_radius,
+            'all_gap_ranges': all_gap_ranges,
+            'proc_ranges': proc.copy(),
         }
 
     def _empty_result(self, start_idx, end_idx, angle_min, angle_inc,
                       nearest_idx=None, nearest_dist=None, effective_radius=None):
+        """gap이 없거나 scan 유효하지 않을 때 → 리커버리 시도"""
         if effective_radius is None:
-            effective_radius = self._get_effective_bubble_radius()
+            effective_radius = self._get_effective_bubble_radius(0.0)
+
+        # 전체 스캔에서 열린 방향 찾아 후진 조향 결정
+        scan = self.scan
+        if scan is not None:
+            ranges = np.array(scan.ranges, dtype=np.float32)
+            ranges[np.isnan(ranges)] = 0.0
+            ranges[np.isinf(ranges)] = self.max_range
+            ranges = np.clip(ranges, 0.0, self.max_range)
+            n = len(ranges)
+            a_min = scan.angle_min
+            a_inc = scan.angle_increment
+
+            half_fov = math.radians(self.recovery_fov_deg / 2.0)
+            beam_angles = a_min + np.arange(n) * a_inc
+            mask = np.abs(beam_angles) <= half_fov
+            masked = ranges * mask.astype(np.float32)
+
+            left_mask = mask & (beam_angles > 0)
+            right_mask = mask & (beam_angles < 0)
+            left_mean = float(np.mean(masked[left_mask])) if np.any(left_mask) else 0.0
+            right_mean = float(np.mean(masked[right_mask])) if np.any(right_mask) else 0.0
+
+            if left_mean > right_mean + 0.1:
+                rec_steer = self.recovery_steer
+            elif right_mean > left_mean + 0.1:
+                rec_steer = -self.recovery_steer
+            else:
+                rec_steer = self._steer_ema
+        else:
+            rec_steer = 0.0
+
+        if not self._recovery_active:
+            self._recovery_active = True
+            self.get_logger().warn(
+                f'[RECOVERY] No gap found — reversing. steer={math.degrees(rec_steer):.1f}°'
+            )
+
         return {
-            'steering': 0.0,
-            'speed': 0.0,
+            'steering': rec_steer,
+            'speed': self.recovery_speed,
             'nearest_idx': nearest_idx,
             'nearest_dist': nearest_dist,
             'gap_start': None,
@@ -412,12 +732,14 @@ class GapFollowNode(Node):
             'angle_min': angle_min,
             'angle_inc': angle_inc,
             'effective_radius': effective_radius,
+            'all_gap_ranges': [],
+            'proc_ranges': np.array([], dtype=np.float32),
         }
 
-    def _get_effective_bubble_radius(self):
-        if self.use_vehicle_geometry:
-            return self.vehicle_width / 2.0 + self.vehicle_safety_margin
-        return self.vehicle_width / 2.0 + self.vehicle_safety_margin
+    def _get_effective_bubble_radius(self, v_actual=0.0):
+        base = self.vehicle_width / 2.0 + self.vehicle_safety_margin
+        speed_expand = self.bubble_speed_scale * v_actual
+        return min(base + speed_expand, self.bubble_max_radius)
 
     def _angle_to_index(self, angle_rad, angle_min, angle_inc, n):
         idx = int((angle_rad - angle_min) / angle_inc)
@@ -469,10 +791,22 @@ class GapFollowNode(Node):
         right_score = self._sector_stat(ranges, angle_min, angle_inc, n, -side_e, -side_s)
 
         if left_score > center_score * self.turn_open_ratio and (left_score - right_score) > self.turn_diff_min:
-            return 'left'
-        if right_score > center_score * self.turn_open_ratio and (right_score - left_score) > self.turn_diff_min:
-            return 'right'
-        return 'center'
+            raw_hint = 'left'
+        elif right_score > center_score * self.turn_open_ratio and (right_score - left_score) > self.turn_diff_min:
+            raw_hint = 'right'
+        else:
+            raw_hint = 'center'
+
+        if raw_hint == self._turn_hint_candidate:
+            self._turn_hint_count += 1
+        else:
+            self._turn_hint_candidate = raw_hint
+            self._turn_hint_count = 1
+
+        if self._turn_hint_count >= self.turn_hint_hold_frames:
+            self._turn_hint_stable = self._turn_hint_candidate
+
+        return self._turn_hint_stable
 
     def _get_fov_by_turn_hint(self, turn_hint):
         if not self.use_asymmetric_fov:
@@ -484,25 +818,128 @@ class GapFollowNode(Node):
             return self.right_fov_deg_turn, self.left_fov_deg_turn
         return self.left_fov_deg_nominal, self.right_fov_deg_nominal
 
-    def _select_best_point(self, gap_start, gap_end, turn_hint):
+    def _select_best_point(self, gap_start, gap_end, turn_hint, forward_idx=None, proc=None):
+        """Gap 내 target 선택.
+
+        기존 1번 코드의 deepest beam 장점은 유지하되,
+        2번 코드처럼 gap center 성향을 일부 섞어서 너무 공격적인 끝점 추종을 완화한다.
+        """
         if gap_start is None or gap_end is None:
             return None
+
         gap_len = gap_end - gap_start
         if gap_len <= 0:
             return gap_start
-        if turn_hint == 'center':
-            return (gap_start + gap_end) // 2
+
+        # 1) deepest beam
+        if proc is not None:
+            seg = proc[gap_start:gap_end + 1]
+            deepest_local = int(np.argmax(seg))
+            deepest_idx = gap_start + deepest_local
+        else:
+            deepest_idx = (gap_start + gap_end) // 2
+
+        # 2) center index
+        center_idx = (gap_start + gap_end) // 2
+
+        # 3) blend ratio
+        if not self.use_target_center_blend:
+            blend = 0.0
+        else:
+            if turn_hint == 'center':
+                blend = self.target_center_blend_straight
+            else:
+                blend = self.target_center_blend_turn
+
+        # 4) deepest가 gap 경계 쪽이면 center 비중 추가
+        edge_margin = max(1, int(gap_len * self.target_edge_guard_ratio))
+        if deepest_idx <= gap_start + edge_margin or deepest_idx >= gap_end - edge_margin:
+            blend = min(0.65, blend + 0.20)
+
+        # 5) corner soft bias 유지
+        softened_deepest_idx = deepest_idx
         if turn_hint == 'left':
-            idx = int(gap_start + self.corner_bias_ratio * gap_len)
-            return max(gap_start, min(gap_end, idx))
-        if turn_hint == 'right':
-            idx = int(gap_start + (1.0 - self.corner_bias_ratio) * gap_len)
-            return max(gap_start, min(gap_end, idx))
-        return (gap_start + gap_end) // 2
+            boundary_right = gap_start + int(0.85 * gap_len)
+            if softened_deepest_idx > boundary_right:
+                softened_deepest_idx = gap_start + int(max(0.55, self.corner_bias_ratio) * gap_len)
+        elif turn_hint == 'right':
+            boundary_left = gap_start + int(0.15 * gap_len)
+            if softened_deepest_idx < boundary_left:
+                softened_deepest_idx = gap_start + int((1.0 - max(0.55, self.corner_bias_ratio)) * gap_len)
+
+        # 6) deepest와 center 혼합
+        best_idx = int(round((1.0 - blend) * softened_deepest_idx + blend * center_idx))
+
+        return max(gap_start, min(gap_end, best_idx))
 
     def _estimate_gap_width(self, gap_start, gap_end, rep_dist, angle_inc):
         angular_width = max(0.0, (gap_end - gap_start) * angle_inc)
         return float(2.0 * rep_dist * math.sin(angular_width / 2.0))
+
+    def _compute_threat_distance(self, ranges, angle_min, angle_inc, n):
+        half_fov = math.radians(self.threat_fov_deg)
+        beam_angles = angle_min + np.arange(n) * angle_inc
+        in_fov = np.abs(beam_angles) <= half_fov
+
+        r = ranges[in_fov]
+        a = beam_angles[in_fov]
+
+        valid = r > self.min_valid_range
+        if not np.any(valid):
+            return self.max_range
+
+        r_valid = r[valid]
+        a_valid = a[valid]
+
+        cos_w = np.clip(np.cos(a_valid), self.threat_cos_min, 1.0)
+        threat_dists = r_valid / cos_w
+        return float(np.min(threat_dists))
+
+    def _apply_disparity_extender(self, proc, angle_inc, half_width, start_idx, end_idx):
+        out = proc.copy()
+        seg = proc[start_idx:end_idx]
+        diffs = np.abs(np.diff(seg.astype(np.float32)))
+        disparity_local = np.where(diffs > self.disparity_threshold)[0]
+
+        for li in disparity_local:
+            gi = start_idx + li
+            gi_next = gi + 1
+
+            r_left = float(proc[gi])
+            r_right = float(proc[gi_next])
+
+            if r_left <= r_right:
+                near_dist = r_left if r_left > 0.0 else r_right
+                ext = int(math.atan2(half_width, max(near_dist, 0.1)) / angle_inc)
+                lo = gi
+                hi = min(end_idx, gi + ext)
+            else:
+                near_dist = r_right if r_right > 0.0 else r_left
+                ext = int(math.atan2(half_width, max(near_dist, 0.1)) / angle_inc)
+                lo = max(start_idx, gi_next - ext)
+                hi = gi_next
+
+            out[lo:hi + 1] = 0.0
+
+        return out
+
+    def _score_gap(self, gap, proc, angle_inc, forward_idx=None):
+        width_beams = len(gap)
+        dists = proc[gap[0]:gap[-1] + 1]
+        valid = dists[dists > 0.0]
+        if len(valid) == 0:
+            return -1e6
+
+        max_dist = float(np.max(valid))
+        avg_dist = float(np.mean(valid))
+
+        gap_width_m = 2.0 * avg_dist * math.sin(max(width_beams * angle_inc, 0.0) / 2.0)
+
+        if gap_width_m < self.vehicle_width * 0.8:
+            return -1e6
+
+        depth_cap = 8.0
+        return gap_width_m * min(max_dist, depth_cap)
 
     def _compute_one_side_wall_follow(self, ranges, angle_min, angle_inc, n):
         theta = math.radians(self.wf_theta_deg)
@@ -537,7 +974,6 @@ class GapFollowNode(Node):
 
         error = self.wf_target_dist - D_t1
 
-        # right wall 기준이면 error > 0 -> 벽에서 멀어짐 -> 오른쪽으로 가야 함(음의 steer)
         if self.race_follow_side == 'right':
             raw_steer = -self.wf_kp * error
         else:
@@ -545,6 +981,56 @@ class GapFollowNode(Node):
 
         steer = float(np.clip(raw_steer, -self.wf_max_steer, self.wf_max_steer))
         return True, steer, {'a': a, 'b': b}
+
+    def _compute_wall_repulsion(self, ranges, angle_min, angle_inc, n):
+        side_start_rad = math.radians(self.repulse_side_start_deg)
+        side_end_rad = math.radians(self.repulse_side_end_deg)
+
+        r_i0 = self._angle_to_index(-side_end_rad, angle_min, angle_inc, n)
+        r_i1 = self._angle_to_index(-side_start_rad, angle_min, angle_inc, n)
+        l_i0 = self._angle_to_index(side_start_rad, angle_min, angle_inc, n)
+        l_i1 = self._angle_to_index(side_end_rad, angle_min, angle_inc, n)
+
+        right_seg = ranges[r_i0:r_i1 + 1]
+        left_seg = ranges[l_i0:l_i1 + 1]
+
+        right_valid = right_seg[(right_seg > self.min_valid_range) & (right_seg < self.max_range)]
+        left_valid = left_seg[(left_seg > self.min_valid_range) & (left_seg < self.max_range)]
+
+        right_min = float(np.min(right_valid)) if len(right_valid) > 0 else self.max_range
+        left_min = float(np.min(left_valid)) if len(left_valid) > 0 else self.max_range
+
+        repulse = 0.0
+        d = self.repulse_dist
+
+        if right_min < d:
+            ratio = (1.0 - right_min / d) ** self.repulse_power
+            repulse += ratio * self.repulse_gain
+
+        if left_min < d:
+            ratio = (1.0 - left_min / d) ** self.repulse_power
+            repulse -= ratio * self.repulse_gain
+
+        return float(np.clip(repulse, -self.repulse_max_steer, self.repulse_max_steer))
+
+    def _compute_center_keeping(self, ranges, angle_min, angle_inc, n):
+        angle_deg = self.ck_angle_deg
+        left_angle = math.radians(angle_deg)
+        right_angle = math.radians(-angle_deg)
+
+        left_dist = self._get_range_at(ranges, angle_min, angle_inc, left_angle)
+        right_dist = self._get_range_at(ranges, angle_min, angle_inc, right_angle)
+
+        if left_dist > self.ck_max_dist and right_dist > self.ck_max_dist:
+            return False, 0.0
+
+        if left_dist < self.wf_min_valid_dist or right_dist < self.wf_min_valid_dist:
+            return False, 0.0
+
+        error = left_dist - right_dist
+        raw_steer = self.ck_kp * error
+        steer = float(np.clip(raw_steer, -self.ck_max_steer, self.ck_max_steer))
+        return True, steer
 
     def _apply_steer_rate_limit(self, target_steer, dt):
         max_delta = self.max_steer_rate * dt
@@ -582,6 +1068,9 @@ class GapFollowNode(Node):
         if result['best_idx'] is not None and result['best_dist'] is not None:
             self._publish_best_point(result['best_idx'], result['best_dist'],
                                      result['angle_min'], result['angle_inc'])
+
+        self._publish_all_gaps(result)
+        self._publish_all_gap_centers(result)
 
     def _publish_best_point(self, idx, dist, angle_min, angle_inc):
         x, y = self._polar_to_xy(idx, dist, angle_min, angle_inc)
@@ -657,6 +1146,102 @@ class GapFollowNode(Node):
             marker.points.append(p)
 
         self.gap_pub.publish(marker)
+
+    def _publish_all_gaps(self, result):
+        """알고리즘이 gap으로 인정한 모든 구간만 선분으로 시각화."""
+        marker = Marker()
+        self._make_marker_header(marker)
+        marker.ns = 'gf_all_gaps'
+        marker.id = 100
+        marker.type = Marker.LINE_LIST
+        marker.action = Marker.ADD
+        marker.scale.x = 0.035
+        marker.color = ColorRGBA(r=0.2, g=1.0, b=0.2, a=0.9)
+
+        all_gap_ranges = result.get('all_gap_ranges', [])
+        proc = result.get('proc_ranges', None)
+
+        if proc is None or len(all_gap_ranges) == 0:
+            marker.action = Marker.DELETE
+            self.all_gaps_pub.publish(marker)
+            return
+
+        angle_min = result['angle_min']
+        angle_inc = result['angle_inc']
+
+        for gap_start, gap_end in all_gap_ranges:
+            seg = proc[gap_start:gap_end + 1]
+            valid = seg[seg > 0.0]
+            if len(valid) == 0:
+                continue
+
+            rep_dist = float(np.clip(np.mean(valid), 0.3, self.viz_all_gap_max_range))
+
+            x1, y1 = self._polar_to_xy(gap_start, rep_dist, angle_min, angle_inc)
+            x2, y2 = self._polar_to_xy(gap_end, rep_dist, angle_min, angle_inc)
+
+            p1 = Point()
+            p1.x = float(x1)
+            p1.y = float(y1)
+            p1.z = 0.04
+
+            p2 = Point()
+            p2.x = float(x2)
+            p2.y = float(y2)
+            p2.z = 0.04
+
+            marker.points.append(p1)
+            marker.points.append(p2)
+
+        if len(marker.points) == 0:
+            marker.action = Marker.DELETE
+
+        self.all_gaps_pub.publish(marker)
+
+    def _publish_all_gap_centers(self, result):
+        """모든 recognized gap의 중심점을 점으로 시각화."""
+        marker = Marker()
+        self._make_marker_header(marker)
+        marker.ns = 'gf_all_gap_centers'
+        marker.id = 101
+        marker.type = Marker.POINTS
+        marker.action = Marker.ADD
+        marker.scale.x = 0.10
+        marker.scale.y = 0.10
+        marker.scale.z = 0.10
+        marker.color = ColorRGBA(r=0.0, g=1.0, b=1.0, a=0.95)
+
+        all_gap_ranges = result.get('all_gap_ranges', [])
+        proc = result.get('proc_ranges', None)
+
+        if proc is None or len(all_gap_ranges) == 0:
+            marker.action = Marker.DELETE
+            self.all_gap_centers_pub.publish(marker)
+            return
+
+        angle_min = result['angle_min']
+        angle_inc = result['angle_inc']
+
+        for gap_start, gap_end in all_gap_ranges:
+            center_idx = (gap_start + gap_end) // 2
+            seg = proc[gap_start:gap_end + 1]
+            valid = seg[seg > 0.0]
+            if len(valid) == 0:
+                continue
+
+            rep_dist = float(np.clip(np.mean(valid), 0.3, self.viz_all_gap_max_range))
+            x, y = self._polar_to_xy(center_idx, rep_dist, angle_min, angle_inc)
+
+            p = Point()
+            p.x = float(x)
+            p.y = float(y)
+            p.z = 0.05
+            marker.points.append(p)
+
+        if len(marker.points) == 0:
+            marker.action = Marker.DELETE
+
+        self.all_gap_centers_pub.publish(marker)
 
     def _publish_vehicle_footprint(self):
         half_w = self.vehicle_width / 2.0
