@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Convert geometry_msgs/PoseStamped to nav_msgs/Odometry for robot_localization."""
 
 import rclpy

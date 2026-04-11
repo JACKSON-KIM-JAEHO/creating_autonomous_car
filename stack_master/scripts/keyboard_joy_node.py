@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """
 Converts keyboard input to sensor_msgs/Joy and publishes to /joy.
 Uses pynput to detect simultaneous key presses; speed and steering are fully independent.
