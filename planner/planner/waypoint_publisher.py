@@ -26,6 +26,7 @@ import numpy as np
 import csv
 import os
 
+from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from planner.track_bounds import TrackBounds
 
 
@@ -41,10 +42,7 @@ class WaypointPublisher(Node):
             self.get_logger().error('[WaypointPublisher] map_name parameter is required!')
             return
 
-        # Resolve source map directory from __file__ (realpath resolves symlinks)
-        # __file__: .../creating_autonomous_car/planner/planner/waypoint_publisher.py
-        pkg_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-        self.map_dir = os.path.join(pkg_root, 'stack_master', 'maps', self.map_name)
+        self.map_dir = self._resolve_map_dir(self.map_name)
         self.get_logger().info(f'[WaypointPublisher] map_dir: {self.map_dir}')
 
         # Load track boundaries for d_right/d_left computation
@@ -85,6 +83,29 @@ class WaypointPublisher(Node):
         self.timer = self.create_timer(1.0, self._republish)
 
         self.get_logger().info(f'[WaypointPublisher] Initialized for map: {self.map_name}')
+
+    def _resolve_map_dir(self, map_name):
+        """Find the map directory in install-space first, then source-space."""
+        candidates = []
+
+        try:
+            stack_master_share = get_package_share_directory('stack_master')
+            candidates.append(os.path.join(stack_master_share, 'maps', map_name))
+        except (PackageNotFoundError, Exception):
+            pass
+
+        pkg_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+        candidates.append(os.path.join(pkg_root, 'stack_master', 'maps', map_name))
+
+        cwd_root = os.getcwd()
+        candidates.append(os.path.join(cwd_root, 'stack_master', 'maps', map_name))
+
+        for candidate in candidates:
+            if os.path.isdir(candidate):
+                return candidate
+
+        # Fall back to the first candidate so logs still show the intended location.
+        return candidates[0]
 
     def _load_csv(self, filename):
         """Load CSV file, return list of dicts or None if not found."""

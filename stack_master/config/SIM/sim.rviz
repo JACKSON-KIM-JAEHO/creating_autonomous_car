@@ -10,6 +10,8 @@ Panels:
         - /Ego Robot1/Ego Scan1
         - /Marker1
         - /Marker6
+        - /Marker7
+        - /Marker7/Topic1
       Splitter Ratio: 0.5
     Tree Height: 715
   - Class: rviz_common/Selection
@@ -125,9 +127,9 @@ Visualization Manager:
           Enabled: true
           Invert Rainbow: false
           Max Color: 255; 255; 255
-          Max Intensity: 7.887209415435791
+          Max Intensity: 6.9956135749816895
           Min Color: 0; 0; 0
-          Min Intensity: 1.2208563089370728
+          Min Intensity: 0.4418591260910034
           Name: Ego Scan
           Position Transformer: XYZ
           Selectable: true
@@ -350,7 +352,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        bubble: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -363,7 +365,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        gap: true
+        gf_gap: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -376,7 +378,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        nearest: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -389,7 +391,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        nearest_fov: true
+        gf_nearest_fov: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -402,7 +404,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        gap_fov: true
+        gf_gap_fov: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -415,7 +417,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        target: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -435,6 +437,19 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /gf/target_marker_array
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 50
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /gf/nearest_point_marker
       Value: true
   Enabled: true
   Global Options:
@@ -494,8 +509,8 @@ Visualization Manager:
       Scale: 40.45328903198242
       Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz_default_plugins)
-      X: 13.421485900878906
-      Y: 6.300910472869873
+      X: -2.3497908115386963
+      Y: 6.918905735015869
     Saved: ~
 Window Geometry:
   Displays:
