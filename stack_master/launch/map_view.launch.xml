@@ -1,0 +1,30 @@
+
+<?xml version="1.0"?>
+<launch>
+  <arg name="map" description="Map name (search stack_master/maps/)"/>
+  <arg name="rviz" default="true" description="Launch RViz with stack_master SIM config"/>
+
+  <let name="maps_dir" value="$(find-pkg-share stack_master)/maps"/>
+  <let name="map_path" value="$(var maps_dir)/$(var map)/$(var map)"/>
+  <let name="rviz_config" value="$(find-pkg-share stack_master)/config/SIM/sim.rviz"/>
+
+  <node pkg="stack_master" exec="map_relay_node.py" name="map_relay_node" output="screen"/>
+
+  <node pkg="nav2_lifecycle_manager" exec="lifecycle_manager"
+        name="lifecycle_manager_map_view" output="screen">
+    <param name="use_sim_time" value="false"/>
+    <param name="autostart" value="true"/>
+    <param name="node_names" value="['map_server']"/>
+  </node>
+
+  <node pkg="nav2_map_server" exec="map_server" name="map_server" output="screen">
+    <param name="yaml_filename" value="$(var map_path).yaml"/>
+    <param name="topic" value="map"/>
+    <param name="frame_id" value="map"/>
+    <param name="use_sim_time" value="false"/>
+  </node>
+
+  <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen"
+        args="-d $(var rviz_config)"
+        if="$(var rviz)"/>
+</launch>
