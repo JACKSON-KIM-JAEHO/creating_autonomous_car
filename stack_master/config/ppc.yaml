@@ -1,8 +1,14 @@
 pp:
   ros__parameters:
-    control_rate_hz:  50.0
-    estop_min_dist:   0.5    # [m]
-    estop_angle_deg: 30.0    # [deg]
-    pp_lookahead:     1.0    # [m]
-    pp_wheelbase:     0.33   # [m]
-    pp_max_steer:     0.4    # [rad]
+    control_rate_hz:    50.0
+    estop_min_dist:     0.5    # [m]
+    estop_angle_deg:   30.0    # [deg]
+    pp_lookahead:       1.0    # [m]   minimum lookahead distance
+    pp_lookahead_min:         0.8
+    pp_lookahead_max:         1.0
+    pp_lookahead_preview: 0.3 
+    pp_lookahead_gain:  0.4    # [s]   lookahead = max(min, gain × speed)
+    pp_wheelbase:       0.33   # [m]
+    pp_max_steer:       0.4    # [rad]
+    pp_speed_alpha:     1.0  # low-pass filter coefficient for speed cmd
+    pp_straight_speed_boost: 1.0

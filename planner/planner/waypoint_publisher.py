@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Waypoint Publisher Node for F1TENTH
